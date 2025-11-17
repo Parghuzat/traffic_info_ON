@@ -18,6 +18,7 @@ import {
   Label,
   Progress,
 } from "reactstrap";
+import EventTrafficCard from "./components/EventTrafficCard";
 
 export default function Home() {
   const [trafficData, setTrafficData] = useState(null);
@@ -26,6 +27,7 @@ export default function Home() {
   const [dataType, setDataType] = useState(null);
   const [apiCalls, setApiCalls] = useState([]);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const [directionFilter, setDirectionFilter] = useState("ALL");
 
   const MAX_CALLS = 10;
   const TIME_WINDOW = 60000; // 60 seconds in milliseconds
@@ -101,6 +103,33 @@ export default function Home() {
   const fetchAlerts = () => fetchData("alerts", "Alerts");
   const fetchConstruction = () => fetchData("construction", "Construction");
 
+  // Filter events by direction
+  const filterByDirection = (data) => {
+    if (!data || !Array.isArray(data)) return data;
+    if (directionFilter === "ALL") return data;
+
+    return data.filter((item) => {
+      const direction = (
+        item.direction ||
+        item.directionOfTravel ||
+        item.Direction ||
+        item.DirectionOfTravel ||
+        item.travel_direction ||
+        ""
+      ).toUpperCase();
+
+      // Match direction keywords
+      if (directionFilter === "NORTH" && direction.includes("NORTH"))
+        return true;
+      if (directionFilter === "SOUTH" && direction.includes("SOUTH"))
+        return true;
+      if (directionFilter === "EAST" && direction.includes("EAST")) return true;
+      if (directionFilter === "WEST" && direction.includes("WEST")) return true;
+
+      return false;
+    });
+  };
+
   useEffect(() => {
     // Fetch events data on component mount - only run once
     fetchData("events", "Events");
@@ -118,33 +147,52 @@ export default function Home() {
         </Col>
       </Row>
 
-      {/* Rate Limit Indicator */}
+      {/* Combined Info Bar - Rate Limit and Data Info */}
       <Row className="mb-3">
-        <Col md={{ size: 8, offset: 2 }}>
+        <Col md={{ size: 10, offset: 1 }}>
           <Card
             className={getRecentCallCount() >= MAX_CALLS ? "border-danger" : ""}
           >
             <CardBody className="py-2">
-              <div className="d-flex justify-content-between align-items-center mb-2">
-                <small className="text-muted">
-                  API Calls: {getRecentCallCount()}/{MAX_CALLS} in last 60s
-                </small>
-                {cooldownSeconds > 0 && (
-                  <Badge color="warning">Cooldown: {cooldownSeconds}s</Badge>
+              <div className="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                {/* Left side: API Calls Counter */}
+                <div style={{ minWidth: "200px" }}>
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <small className="text-muted">
+                      API Calls: {getRecentCallCount()}/{MAX_CALLS} in last 60s
+                    </small>
+                    {cooldownSeconds > 0 && (
+                      <Badge color="warning" className="ms-2">
+                        Cooldown: {cooldownSeconds}s
+                      </Badge>
+                    )}
+                  </div>
+                  <Progress
+                    value={(getRecentCallCount() / MAX_CALLS) * 100}
+                    color={
+                      getRecentCallCount() >= MAX_CALLS
+                        ? "danger"
+                        : getRecentCallCount() >= 7
+                        ? "warning"
+                        : "success"
+                    }
+                    className="mb-0"
+                    style={{ height: "8px" }}
+                  />
+                </div>
+
+                {/* Right side: Data Type and Last Updated */}
+                {trafficData && trafficData.success && (
+                  <div className="d-flex align-items-center gap-2">
+                    <span className="fw-bold">{dataType} Data</span>
+                    <Badge color="success">Live</Badge>
+                    <small className="text-muted">
+                      Updated:{" "}
+                      {new Date(trafficData.timestamp).toLocaleTimeString()}
+                    </small>
+                  </div>
                 )}
               </div>
-              <Progress
-                value={(getRecentCallCount() / MAX_CALLS) * 100}
-                color={
-                  getRecentCallCount() >= MAX_CALLS
-                    ? "danger"
-                    : getRecentCallCount() >= 7
-                    ? "warning"
-                    : "success"
-                }
-                className="mb-0"
-                style={{ height: "8px" }}
-              />
             </CardBody>
           </Card>
         </Col>
@@ -193,6 +241,59 @@ export default function Home() {
         </Col>
       </Row>
 
+      {/* Direction Filter Buttons - Only show for Events */}
+      {dataType === "Events" && trafficData && trafficData.success && (
+        <Row className="mb-4">
+          <Col>
+            <div className="d-flex justify-content-center gap-2 flex-wrap">
+              <Button
+                color={directionFilter === "ALL" ? "dark" : "outline-dark"}
+                size="sm"
+                onClick={() => setDirectionFilter("ALL")}
+              >
+                All Directions
+              </Button>
+              <Button
+                color={
+                  directionFilter === "NORTH" ? "primary" : "outline-primary"
+                }
+                size="sm"
+                onClick={() => setDirectionFilter("NORTH")}
+              >
+                ⬆️ N
+              </Button>
+              <Button
+                color={
+                  directionFilter === "SOUTH" ? "primary" : "outline-primary"
+                }
+                size="sm"
+                onClick={() => setDirectionFilter("SOUTH")}
+              >
+                ⬇️ S
+              </Button>
+              <Button
+                color={
+                  directionFilter === "EAST" ? "success" : "outline-success"
+                }
+                size="sm"
+                onClick={() => setDirectionFilter("EAST")}
+              >
+                ➡️ E
+              </Button>
+              <Button
+                color={
+                  directionFilter === "WEST" ? "success" : "outline-success"
+                }
+                size="sm"
+                onClick={() => setDirectionFilter("WEST")}
+              >
+                ⬅️ W
+              </Button>
+            </div>
+          </Col>
+        </Row>
+      )}
+
       {error && (
         <Row className="mb-4">
           <Col md={{ size: 8, offset: 2 }}>
@@ -218,57 +319,78 @@ export default function Home() {
       {trafficData && trafficData.success && (
         <Row>
           <Col>
-            <Card className="mb-3">
-              <CardBody>
-                <CardTitle tag="h5">
-                  {dataType} Data
-                  <Badge color="success" className="ms-2">
-                    Live
-                  </Badge>
-                </CardTitle>
-                <CardText>
-                  <small className="text-muted">
-                    Last updated:{" "}
-                    {new Date(trafficData.timestamp).toLocaleString()}
-                  </small>
-                </CardText>
-              </CardBody>
-            </Card>
-
             {trafficData.data &&
             Array.isArray(trafficData.data) &&
             trafficData.data.length > 0 ? (
-              <Row>
-                {trafficData.data.slice(0, 20).map((item, index) => (
-                  <Col md={6} lg={4} key={index} className="mb-3">
-                    <Card>
-                      <CardBody>
-                        <CardTitle tag="h6">
-                          {item.event_type || item.type || "Traffic Event"}
-                        </CardTitle>
-                        <CardText>
-                          {item.description ||
-                            item.headline ||
-                            JSON.stringify(item).substring(0, 100)}
-                        </CardText>
-                        {item.severity && (
-                          <Badge
-                            color={
-                              item.severity.toLowerCase() === "high"
-                                ? "danger"
-                                : item.severity.toLowerCase() === "medium"
-                                ? "warning"
-                                : "info"
-                            }
+              dataType === "Events" ? (
+                // Use EventTrafficCard for Events data with direction filter
+                (() => {
+                  const filteredData = filterByDirection(trafficData.data);
+                  return filteredData.length > 0 ? (
+                    <div>
+                      <p className="text-muted mb-3">
+                        Showing {filteredData.length} of{" "}
+                        {trafficData.data.length} events
+                        {directionFilter !== "ALL" &&
+                          ` (${directionFilter}BOUND)`}
+                      </p>
+                      <Row>
+                        {filteredData.slice(0, 50).map((item, index) => (
+                          <Col
+                            key={index}
+                            xs={12}
+                            sm={6}
+                            md={6}
+                            lg={4}
+                            xl={3}
+                            className="mb-3"
                           >
-                            {item.severity}
-                          </Badge>
-                        )}
-                      </CardBody>
-                    </Card>
-                  </Col>
-                ))}
-              </Row>
+                            <EventTrafficCard event={item} />
+                          </Col>
+                        ))}
+                      </Row>
+                    </div>
+                  ) : (
+                    <Alert color="warning">
+                      No events found for {directionFilter}BOUND direction. Try
+                      a different filter.
+                    </Alert>
+                  );
+                })()
+              ) : (
+                // Default card layout for Alerts and Construction
+                <Row>
+                  {trafficData.data.slice(0, 20).map((item, index) => (
+                    <Col md={6} lg={4} key={index} className="mb-3">
+                      <Card>
+                        <CardBody>
+                          <CardTitle tag="h6">
+                            {item.event_type || item.type || "Traffic Event"}
+                          </CardTitle>
+                          <CardText>
+                            {item.description ||
+                              item.headline ||
+                              JSON.stringify(item).substring(0, 100)}
+                          </CardText>
+                          {item.severity && (
+                            <Badge
+                              color={
+                                item.severity.toLowerCase() === "high"
+                                  ? "danger"
+                                  : item.severity.toLowerCase() === "medium"
+                                  ? "warning"
+                                  : "info"
+                              }
+                            >
+                              {item.severity}
+                            </Badge>
+                          )}
+                        </CardBody>
+                      </Card>
+                    </Col>
+                  ))}
+                </Row>
+              )
             ) : (
               <Alert color="info">
                 <h5>Raw API Response</h5>
