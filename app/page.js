@@ -102,8 +102,8 @@ export default function Home() {
   };
 
   const fetchEvents = () => fetchData("events", "Events");
+  const fetchAlerts = () => fetchData("alerts", "Alerts");
   // Temporarily disabled other data types
-  // const fetchAlerts = () => fetchData("alerts", "Alerts");
   // const fetchConstruction = () => fetchData("construction", "Construction");
 
   // Filter events by roadway (prior to direction filtering)
@@ -210,6 +210,11 @@ export default function Home() {
           <p className="text-center text-muted">
             Real-time traffic data from 511 Ontario API
           </p>
+          <div className="text-center mt-3">
+            <Button color="info" outline size="sm" href="/nearby" tag="a">
+              📍 Nearby Traffic (Location-Based)
+            </Button>
+          </div>
         </Col>
       </Row>
 
@@ -279,18 +284,21 @@ export default function Home() {
               ) : null}
               Traffic Events
             </Button>
-            {/* Alerts & Construction temporarily hidden */}
+            <Button
+              color="warning"
+              size="lg"
+              onClick={fetchAlerts}
+              disabled={loading || !canMakeApiCall()}
+              active={dataType === "Alerts"}
+            >
+              {loading && dataType === "Alerts" ? (
+                <Spinner size="sm" className="me-2" />
+              ) : null}
+              Traffic Alerts
+            </Button>
+            {/* Construction temporarily hidden */}
             {false && (
               <>
-                <Button
-                  color="warning"
-                  size="lg"
-                  // onClick={fetchAlerts}
-                  disabled
-                  active={dataType === "Alerts"}
-                >
-                  Traffic Alerts
-                </Button>
                 <Button
                   color="info"
                   size="lg"

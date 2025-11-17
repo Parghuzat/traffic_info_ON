@@ -1,0 +1,563 @@
+"use client";
+
+import { useState, useEffect, useRef } from "react";
+import {
+  Container,
+  Row,
+  Col,
+  Card,
+  CardBody,
+  Spinner,
+  Alert,
+  Badge,
+  Button,
+  Progress,
+} from "reactstrap";
+import EventTrafficCard from "../components/EventTrafficCard";
+
+export default function NearbyTraffic() {
+  const [trafficData, setTrafficData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [locationStatus, setLocationStatus] = useState("idle"); // idle, requesting, tracking, ready, error
+  const [userLocation, setUserLocation] = useState(null);
+  const [userDirection, setUserDirection] = useState(null); // bearing in degrees
+  const [nearestRoad, setNearestRoad] = useState(null);
+  const [travelDirection, setTravelDirection] = useState(null); // N, S, E, W
+
+  // API rate limiting
+  const [apiCalls, setApiCalls] = useState([]);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const MAX_CALLS = 10;
+  const TIME_WINDOW = 60000;
+  const COOLDOWN_AFTER_LIMIT = 30000;
+
+  const locationWatchId = useRef(null);
+  const firstPosition = useRef(null);
+  const secondPosition = useRef(null);
+
+  // Check if we can make API call
+  const canMakeApiCall = () => {
+    const now = Date.now();
+    const recentCallCount = apiCalls.filter(
+      (timestamp) => now - timestamp < TIME_WINDOW
+    ).length;
+    return recentCallCount < MAX_CALLS && cooldownSeconds === 0;
+  };
+
+  const getRecentCallCount = () => {
+    const now = Date.now();
+    return apiCalls.filter((timestamp) => now - timestamp < TIME_WINDOW).length;
+  };
+
+  // Cooldown timer
+  useEffect(() => {
+    if (cooldownSeconds > 0) {
+      const timer = setTimeout(() => {
+        setCooldownSeconds(cooldownSeconds - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [cooldownSeconds]);
+
+  // Calculate distance between two coordinates (Haversine formula)
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371; // Earth's radius in km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in km
+  };
+
+  // Calculate bearing between two coordinates
+  const calculateBearing = (lat1, lon1, lat2, lon2) => {
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const y = Math.sin(dLon) * Math.cos((lat2 * Math.PI) / 180);
+    const x =
+      Math.cos((lat1 * Math.PI) / 180) * Math.sin((lat2 * Math.PI) / 180) -
+      Math.sin((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.cos(dLon);
+    const bearing = (Math.atan2(y, x) * 180) / Math.PI;
+    return (bearing + 360) % 360; // Normalize to 0-360
+  };
+
+  // Convert bearing to cardinal direction
+  const bearingToDirection = (bearing) => {
+    if (bearing >= 315 || bearing < 45) return "NORTH";
+    if (bearing >= 45 && bearing < 135) return "EAST";
+    if (bearing >= 135 && bearing < 225) return "SOUTH";
+    if (bearing >= 225 && bearing < 315) return "WEST";
+    return "NORTH";
+  };
+
+  // Find nearest road from events data
+  const findNearestRoad = (lat, lon, eventsData) => {
+    if (!eventsData || !Array.isArray(eventsData) || eventsData.length === 0) {
+      return null;
+    }
+
+    let nearest = null;
+    let minDistance = Infinity;
+
+    eventsData.forEach((event) => {
+      const eventLat = event.Latitude || event.latitude;
+      const eventLon = event.Longitude || event.longitude;
+
+      if (eventLat && eventLon) {
+        const distance = calculateDistance(lat, lon, eventLat, eventLon);
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearest = {
+            road:
+              event.RoadwayName ||
+              event.roadwayName ||
+              event.roadway ||
+              "Unknown",
+            distance: distance,
+          };
+        }
+      }
+    });
+
+    return nearest;
+  };
+
+  // Request location permission and start tracking
+  const startLocationTracking = async () => {
+    if (!navigator.geolocation) {
+      setError("Geolocation is not supported by your browser");
+      setLocationStatus("error");
+      return;
+    }
+
+    setLocationStatus("requesting");
+    setError(null);
+
+    try {
+      // Get first position
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          firstPosition.current = {
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+            timestamp: position.timestamp,
+          };
+          setUserLocation(firstPosition.current);
+          setLocationStatus("tracking");
+
+          // Wait 4 seconds and get second position
+          setTimeout(() => {
+            navigator.geolocation.getCurrentPosition(
+              (position2) => {
+                secondPosition.current = {
+                  lat: position2.coords.latitude,
+                  lon: position2.coords.longitude,
+                  timestamp: position2.timestamp,
+                };
+
+                // Calculate bearing and direction
+                const bearing = calculateBearing(
+                  firstPosition.current.lat,
+                  firstPosition.current.lon,
+                  secondPosition.current.lat,
+                  secondPosition.current.lon
+                );
+
+                const distance = calculateDistance(
+                  firstPosition.current.lat,
+                  firstPosition.current.lon,
+                  secondPosition.current.lat,
+                  secondPosition.current.lon
+                );
+
+                // Only set direction if moved significantly (> 10 meters)
+                if (distance > 0.01) {
+                  setUserDirection(bearing);
+                  setTravelDirection(bearingToDirection(bearing));
+                }
+
+                setUserLocation(secondPosition.current);
+                setLocationStatus("ready");
+
+                // Auto-fetch traffic data
+                fetchTrafficData();
+              },
+              (err) => {
+                console.error("Error getting second position:", err);
+                setLocationStatus("ready"); // Still use first position
+                fetchTrafficData();
+              },
+              { enableHighAccuracy: true, timeout: 10000 }
+            );
+          }, 4000);
+        },
+        (err) => {
+          setError(`Location error: ${err.message}`);
+          setLocationStatus("error");
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } catch (err) {
+      setError(`Failed to get location: ${err.message}`);
+      setLocationStatus("error");
+    }
+  };
+
+  // Fetch traffic data
+  const fetchTrafficData = async () => {
+    if (!canMakeApiCall()) {
+      setError(
+        `Rate limit: Maximum ${MAX_CALLS} calls per 60 seconds. Please wait.`
+      );
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/events");
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to fetch traffic data");
+      }
+
+      setTrafficData(result);
+
+      // Find nearest road
+      if (userLocation && result.data) {
+        const nearest = findNearestRoad(
+          userLocation.lat,
+          userLocation.lon,
+          result.data
+        );
+        setNearestRoad(nearest);
+      }
+
+      // Track API call
+      const now = Date.now();
+      const newApiCalls = [...apiCalls, now];
+      setApiCalls(newApiCalls);
+
+      if (
+        newApiCalls.filter((timestamp) => now - timestamp < TIME_WINDOW)
+          .length >= MAX_CALLS
+      ) {
+        setCooldownSeconds(30);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter and sort events by proximity and direction
+  const getFilteredEvents = () => {
+    if (!trafficData?.data || !Array.isArray(trafficData.data)) {
+      return [];
+    }
+
+    let filtered = trafficData.data;
+
+    // Filter by nearest road if available
+    if (nearestRoad && nearestRoad.road !== "Unknown") {
+      filtered = filtered.filter((event) => {
+        const roadway = (
+          event.RoadwayName ||
+          event.roadwayName ||
+          event.roadway ||
+          ""
+        ).toUpperCase();
+        return roadway.includes(nearestRoad.road.toUpperCase());
+      });
+    }
+
+    // Filter by travel direction if available
+    if (travelDirection) {
+      filtered = filtered.filter((event) => {
+        const direction = (
+          event.DirectionOfTravel ||
+          event.directionOfTravel ||
+          event.direction ||
+          ""
+        ).toUpperCase();
+        return direction.includes(travelDirection);
+      });
+    }
+
+    // Sort by distance from user location
+    if (userLocation) {
+      filtered = filtered
+        .map((event) => {
+          const eventLat = event.Latitude || event.latitude;
+          const eventLon = event.Longitude || event.longitude;
+          const distance =
+            eventLat && eventLon
+              ? calculateDistance(
+                  userLocation.lat,
+                  userLocation.lon,
+                  eventLat,
+                  eventLon
+                )
+              : Infinity;
+          return { ...event, distance };
+        })
+        .sort((a, b) => a.distance - b.distance);
+    }
+
+    return filtered;
+  };
+
+  const filteredEvents = getFilteredEvents();
+
+  return (
+    <Container className="py-4">
+      <Row className="mb-4">
+        <Col>
+          <div className="d-flex justify-content-between align-items-center mb-2">
+            <div>
+              <h1 className="mb-2">Nearby Traffic</h1>
+              <p className="text-muted mb-0">
+                Auto-detect your location and direction to show relevant traffic
+                ahead
+              </p>
+            </div>
+            <Button color="secondary" outline size="sm" href="/" tag="a">
+              ← Back to All Traffic
+            </Button>
+          </div>
+        </Col>
+      </Row>
+
+      {/* API Rate Limiting Info */}
+      <Row className="mb-3">
+        <Col>
+          <Card>
+            <CardBody className="py-2">
+              <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div className="d-flex align-items-center gap-2">
+                  <small className="text-muted">
+                    API Calls: {getRecentCallCount()}/{MAX_CALLS}
+                  </small>
+                  {cooldownSeconds > 0 && (
+                    <Badge color="warning">Cooldown: {cooldownSeconds}s</Badge>
+                  )}
+                </div>
+                <div className="d-flex align-items-center gap-2">
+                  {locationStatus !== "idle" && (
+                    <Badge
+                      color={
+                        locationStatus === "ready"
+                          ? "success"
+                          : locationStatus === "error"
+                          ? "danger"
+                          : "info"
+                      }
+                    >
+                      {locationStatus === "requesting" &&
+                        "Requesting location..."}
+                      {locationStatus === "tracking" && "Tracking movement..."}
+                      {locationStatus === "ready" && "Location ready"}
+                      {locationStatus === "error" && "Location error"}
+                    </Badge>
+                  )}
+                  {trafficData && (
+                    <small className="text-muted">
+                      Last updated:{" "}
+                      {new Date(trafficData.timestamp).toLocaleTimeString()}
+                    </small>
+                  )}
+                </div>
+              </div>
+              {getRecentCallCount() > 0 && (
+                <Progress
+                  value={(getRecentCallCount() / MAX_CALLS) * 100}
+                  color={
+                    getRecentCallCount() >= MAX_CALLS
+                      ? "danger"
+                      : getRecentCallCount() >= MAX_CALLS * 0.7
+                      ? "warning"
+                      : "success"
+                  }
+                  className="mt-2"
+                  style={{ height: "4px" }}
+                />
+              )}
+            </CardBody>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Location Control */}
+      {locationStatus === "idle" && (
+        <Row className="mb-4">
+          <Col md={{ size: 6, offset: 3 }}>
+            <Card>
+              <CardBody className="text-center">
+                <h5>Enable Location Services</h5>
+                <p className="text-muted mb-3">
+                  Allow access to your location to automatically show traffic
+                  events ahead on your route
+                </p>
+                <Button
+                  color="primary"
+                  size="lg"
+                  onClick={startLocationTracking}
+                  disabled={loading}
+                >
+                  📍 Use My Location
+                </Button>
+              </CardBody>
+            </Card>
+          </Col>
+        </Row>
+      )}
+
+      {/* Location Info Display */}
+      {userLocation && locationStatus !== "idle" && (
+        <Row className="mb-4">
+          <Col>
+            <Card>
+              <CardBody>
+                <div className="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                  <div>
+                    <strong>Your Location:</strong>{" "}
+                    <small className="text-muted">
+                      {userLocation.lat.toFixed(6)},{" "}
+                      {userLocation.lon.toFixed(6)}
+                    </small>
+                  </div>
+                  {nearestRoad && (
+                    <div>
+                      <strong>Nearest Road:</strong>{" "}
+                      <Badge color="info">{nearestRoad.road}</Badge>{" "}
+                      <small className="text-muted">
+                        ({nearestRoad.distance.toFixed(1)} km away)
+                      </small>
+                    </div>
+                  )}
+                  {travelDirection && (
+                    <div>
+                      <strong>Direction:</strong>{" "}
+                      <Badge color="success">{travelDirection}BOUND</Badge>
+                      {userDirection !== null && (
+                        <small className="text-muted ms-2">
+                          ({userDirection.toFixed(0)}°)
+                        </small>
+                      )}
+                    </div>
+                  )}
+                  <div>
+                    <Button
+                      color="secondary"
+                      size="sm"
+                      onClick={fetchTrafficData}
+                      disabled={loading || !canMakeApiCall()}
+                    >
+                      {loading ? <Spinner size="sm" /> : "🔄 Refresh"}
+                    </Button>
+                  </div>
+                </div>
+              </CardBody>
+            </Card>
+          </Col>
+        </Row>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <Row className="mb-4">
+          <Col md={{ size: 8, offset: 2 }}>
+            <Alert color="danger">
+              <strong>Error:</strong> {error}
+            </Alert>
+          </Col>
+        </Row>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <Row>
+          <Col className="text-center">
+            <Spinner
+              color="primary"
+              style={{ width: "3rem", height: "3rem" }}
+            />
+            <p className="mt-3">Loading traffic data...</p>
+          </Col>
+        </Row>
+      )}
+
+      {/* Traffic Events Display */}
+      {trafficData && trafficData.success && filteredEvents.length > 0 && (
+        <Row>
+          <Col>
+            <div className="mb-3">
+              <p className="text-muted">
+                Showing {filteredEvents.slice(0, 50).length} events
+                {nearestRoad && ` on ${nearestRoad.road}`}
+                {travelDirection && ` (${travelDirection}BOUND)`}
+              </p>
+            </div>
+            <Row>
+              {filteredEvents.slice(0, 50).map((item, index) => (
+                <Col
+                  key={index}
+                  xs={12}
+                  sm={6}
+                  md={6}
+                  lg={4}
+                  xl={3}
+                  className="mb-3"
+                >
+                  <div className="position-relative">
+                    <EventTrafficCard event={item} />
+                    {item.distance !== undefined &&
+                      item.distance !== Infinity && (
+                        <Badge
+                          color="dark"
+                          className="position-absolute"
+                          style={{
+                            top: "10px",
+                            left: "10px",
+                            fontSize: "0.7rem",
+                          }}
+                        >
+                          {item.distance.toFixed(1)} km
+                        </Badge>
+                      )}
+                  </div>
+                </Col>
+              ))}
+            </Row>
+          </Col>
+        </Row>
+      )}
+
+      {/* No Results */}
+      {trafficData && trafficData.success && filteredEvents.length === 0 && (
+        <Row>
+          <Col md={{ size: 6, offset: 3 }}>
+            <Alert color="success">
+              <h5>🎉 All Clear!</h5>
+              <p className="mb-0">
+                No traffic events found
+                {nearestRoad && ` on ${nearestRoad.road}`}
+                {travelDirection && ` in ${travelDirection}BOUND direction`}.
+              </p>
+            </Alert>
+          </Col>
+        </Row>
+      )}
+    </Container>
+  );
+}
