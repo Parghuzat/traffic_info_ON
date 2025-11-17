@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Container,
   Row,
@@ -16,26 +16,80 @@ import {
   Input,
   FormGroup,
   Label,
+  Progress,
 } from "reactstrap";
 
 export default function Home() {
   const [trafficData, setTrafficData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [dataType, setDataType] = useState(null);
+  const [apiCalls, setApiCalls] = useState([]);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
 
-  const fetchTrafficData = async () => {
+  const MAX_CALLS = 10;
+  const TIME_WINDOW = 60000; // 60 seconds in milliseconds
+  const COOLDOWN_AFTER_LIMIT = 30000; // 30 second cooldown after hitting limit
+
+  // Check if we can make a call (read-only, doesn't update state)
+  const canMakeApiCall = () => {
+    const now = Date.now();
+    const recentCallCount = apiCalls.filter(
+      (timestamp) => now - timestamp < TIME_WINDOW
+    ).length;
+    return recentCallCount < MAX_CALLS && cooldownSeconds === 0;
+  };
+
+  // Get recent call count for display (read-only)
+  const getRecentCallCount = () => {
+    const now = Date.now();
+    return apiCalls.filter((timestamp) => now - timestamp < TIME_WINDOW).length;
+  };
+
+  // Cooldown timer
+  useEffect(() => {
+    if (cooldownSeconds > 0) {
+      const timer = setTimeout(() => {
+        setCooldownSeconds(cooldownSeconds - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [cooldownSeconds]);
+
+  const fetchData = async (endpoint, type) => {
+    if (!canMakeApiCall()) {
+      setError(
+        `Rate limit: Maximum ${MAX_CALLS} calls per 60 seconds. Please wait.`
+      );
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    setDataType(type);
 
     try {
-      const response = await fetch("/api/traffic");
+      const response = await fetch(`/api/${endpoint}`);
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || "Failed to fetch traffic data");
+        throw new Error(result.error || `Failed to fetch ${type} data`);
       }
 
       setTrafficData(result);
+
+      // Track this API call
+      const now = Date.now();
+      const newApiCalls = [...apiCalls, now];
+      setApiCalls(newApiCalls);
+
+      // If we've hit the limit, start cooldown
+      if (
+        newApiCalls.filter((timestamp) => now - timestamp < TIME_WINDOW)
+          .length >= MAX_CALLS
+      ) {
+        setCooldownSeconds(30);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -43,9 +97,14 @@ export default function Home() {
     }
   };
 
+  const fetchEvents = () => fetchData("events", "Events");
+  const fetchAlerts = () => fetchData("alerts", "Alerts");
+  const fetchConstruction = () => fetchData("construction", "Construction");
+
   useEffect(() => {
-    // Fetch traffic data on component mount
-    fetchTrafficData();
+    // Fetch events data on component mount - only run once
+    fetchData("events", "Events");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -59,16 +118,78 @@ export default function Home() {
         </Col>
       </Row>
 
-      <Row className="mb-4">
-        <Col md={{ size: 6, offset: 3 }} className="text-center">
-          <Button
-            color="primary"
-            size="lg"
-            onClick={fetchTrafficData}
-            disabled={loading}
+      {/* Rate Limit Indicator */}
+      <Row className="mb-3">
+        <Col md={{ size: 8, offset: 2 }}>
+          <Card
+            className={getRecentCallCount() >= MAX_CALLS ? "border-danger" : ""}
           >
-            {loading ? <Spinner size="sm" /> : "Refresh Traffic Data"}
-          </Button>
+            <CardBody className="py-2">
+              <div className="d-flex justify-content-between align-items-center mb-2">
+                <small className="text-muted">
+                  API Calls: {getRecentCallCount()}/{MAX_CALLS} in last 60s
+                </small>
+                {cooldownSeconds > 0 && (
+                  <Badge color="warning">Cooldown: {cooldownSeconds}s</Badge>
+                )}
+              </div>
+              <Progress
+                value={(getRecentCallCount() / MAX_CALLS) * 100}
+                color={
+                  getRecentCallCount() >= MAX_CALLS
+                    ? "danger"
+                    : getRecentCallCount() >= 7
+                    ? "warning"
+                    : "success"
+                }
+                className="mb-0"
+                style={{ height: "8px" }}
+              />
+            </CardBody>
+          </Card>
+        </Col>
+      </Row>
+
+      <Row className="mb-4">
+        <Col md={{ size: 10, offset: 1 }}>
+          <div className="d-flex justify-content-center gap-3 flex-wrap">
+            <Button
+              color="primary"
+              size="lg"
+              onClick={fetchEvents}
+              disabled={loading || !canMakeApiCall()}
+              active={dataType === "Events"}
+            >
+              {loading && dataType === "Events" ? (
+                <Spinner size="sm" className="me-2" />
+              ) : null}
+              Traffic Events
+            </Button>
+            <Button
+              color="warning"
+              size="lg"
+              onClick={fetchAlerts}
+              disabled={loading || !canMakeApiCall()}
+              active={dataType === "Alerts"}
+            >
+              {loading && dataType === "Alerts" ? (
+                <Spinner size="sm" className="me-2" />
+              ) : null}
+              Traffic Alerts
+            </Button>
+            <Button
+              color="info"
+              size="lg"
+              onClick={fetchConstruction}
+              disabled={loading || !canMakeApiCall()}
+              active={dataType === "Construction"}
+            >
+              {loading && dataType === "Construction" ? (
+                <Spinner size="sm" className="me-2" />
+              ) : null}
+              Construction
+            </Button>
+          </div>
         </Col>
       </Row>
 
@@ -100,7 +221,7 @@ export default function Home() {
             <Card className="mb-3">
               <CardBody>
                 <CardTitle tag="h5">
-                  Traffic Data
+                  {dataType} Data
                   <Badge color="success" className="ms-2">
                     Live
                   </Badge>

@@ -1,19 +1,12 @@
 import { NextResponse } from "next/server";
 
 /**
- * API route to fetch traffic data from 511 Ontario API
- *
- * 511 Ontario provides real-time traffic information for Ontario, Canada.
- * API Documentation: https://511on.ca/api
+ * API route to fetch construction data from 511 Ontario API
  */
 
 export async function GET(request) {
   try {
-    // Extract query parameters
-    const { searchParams } = new URL(request.url);
-
-    // 511 Ontario API endpoint
-    const apiUrl = `https://511on.ca/api/v2/get`;
+    const apiUrl = `https://511on.ca/api/v2/get/construction`;
 
     const response = await fetch(apiUrl, {
       headers: {
@@ -31,16 +24,21 @@ export async function GET(request) {
 
     const data = await response.json();
 
+    console.log(
+      "511 Ontario Construction Response:",
+      JSON.stringify(data, null, 2)
+    );
+
     return NextResponse.json({
       success: true,
       data: data,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Error fetching traffic data:", error);
+    console.error("Error fetching construction data:", error);
     return NextResponse.json(
       {
-        error: "Failed to fetch traffic data",
+        error: "Failed to fetch construction data",
         message: error.message,
       },
       { status: 500 }
