@@ -28,6 +28,8 @@ export default function Home() {
   const [apiCalls, setApiCalls] = useState([]);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [directionFilter, setDirectionFilter] = useState("ALL");
+  // Roadway filter: focus on Highway 401 frequent usage
+  const [roadwayFilter, setRoadwayFilter] = useState("ALL");
 
   const MAX_CALLS = 10;
   const TIME_WINDOW = 60000; // 60 seconds in milliseconds
@@ -100,8 +102,56 @@ export default function Home() {
   };
 
   const fetchEvents = () => fetchData("events", "Events");
-  const fetchAlerts = () => fetchData("alerts", "Alerts");
-  const fetchConstruction = () => fetchData("construction", "Construction");
+  // Temporarily disabled other data types
+  // const fetchAlerts = () => fetchData("alerts", "Alerts");
+  // const fetchConstruction = () => fetchData("construction", "Construction");
+
+  // Filter events by roadway (prior to direction filtering)
+  const filterByRoadway = (data) => {
+    if (!data || !Array.isArray(data)) return data;
+    if (roadwayFilter === "ALL") return data;
+
+    const matches401 = (item) => {
+      const roadway = (
+        item.roadway ||
+        item.roadwayName ||
+        item.RoadwayName ||
+        item.roadName ||
+        ""
+      )
+        .toString()
+        .toUpperCase();
+      return roadway.includes("401");
+    };
+
+    const directionText = (
+      item.direction ||
+      item.directionOfTravel ||
+      item.Direction ||
+      item.DirectionOfTravel ||
+      item.travel_direction ||
+      ""
+    )
+      .toString()
+      .toUpperCase();
+
+    switch (roadwayFilter) {
+      case "401":
+        return data.filter((item) => matches401(item));
+      case "401_E":
+        return data.filter(
+          (item) => matches401(item) && directionText.includes("EAST")
+        );
+      case "401_W":
+        return data.filter(
+          (item) => matches401(item) && directionText.includes("WEST")
+        );
+      case "OTHER":
+        return data.filter((item) => !matches401(item));
+      default:
+        return data;
+    }
+  };
 
   // Filter events by direction
   const filterByDirection = (data) => {
@@ -213,30 +263,29 @@ export default function Home() {
               ) : null}
               Traffic Events
             </Button>
-            <Button
-              color="warning"
-              size="lg"
-              onClick={fetchAlerts}
-              disabled={loading || !canMakeApiCall()}
-              active={dataType === "Alerts"}
-            >
-              {loading && dataType === "Alerts" ? (
-                <Spinner size="sm" className="me-2" />
-              ) : null}
-              Traffic Alerts
-            </Button>
-            <Button
-              color="info"
-              size="lg"
-              onClick={fetchConstruction}
-              disabled={loading || !canMakeApiCall()}
-              active={dataType === "Construction"}
-            >
-              {loading && dataType === "Construction" ? (
-                <Spinner size="sm" className="me-2" />
-              ) : null}
-              Construction
-            </Button>
+            {/* Alerts & Construction temporarily hidden */}
+            {false && (
+              <>
+                <Button
+                  color="warning"
+                  size="lg"
+                  // onClick={fetchAlerts}
+                  disabled
+                  active={dataType === "Alerts"}
+                >
+                  Traffic Alerts
+                </Button>
+                <Button
+                  color="info"
+                  size="lg"
+                  // onClick={fetchConstruction}
+                  disabled
+                  active={dataType === "Construction"}
+                >
+                  Construction
+                </Button>
+              </>
+            )}
           </div>
         </Col>
       </Row>
@@ -245,6 +294,51 @@ export default function Home() {
       {dataType === "Events" && trafficData && trafficData.success && (
         <Row className="mb-4">
           <Col>
+            {/* Roadway Filters */}
+            <div className="d-flex justify-content-center gap-2 flex-wrap mb-3">
+              <Button
+                color={
+                  roadwayFilter === "ALL" ? "secondary" : "outline-secondary"
+                }
+                size="sm"
+                onClick={() => setRoadwayFilter("ALL")}
+              >
+                All Roads
+              </Button>
+              <Button
+                color={roadwayFilter === "401" ? "primary" : "outline-primary"}
+                size="sm"
+                onClick={() => setRoadwayFilter("401")}
+              >
+                Hwy 401
+              </Button>
+              <Button
+                color={
+                  roadwayFilter === "401_E" ? "primary" : "outline-primary"
+                }
+                size="sm"
+                onClick={() => setRoadwayFilter("401_E")}
+              >
+                401 EB
+              </Button>
+              <Button
+                color={
+                  roadwayFilter === "401_W" ? "primary" : "outline-primary"
+                }
+                size="sm"
+                onClick={() => setRoadwayFilter("401_W")}
+              >
+                401 WB
+              </Button>
+              <Button
+                color={roadwayFilter === "OTHER" ? "dark" : "outline-dark"}
+                size="sm"
+                onClick={() => setRoadwayFilter("OTHER")}
+              >
+                Other Roads
+              </Button>
+            </div>
+            {/* Direction Filters */}
             <div className="d-flex justify-content-center gap-2 flex-wrap">
               <Button
                 color={directionFilter === "ALL" ? "dark" : "outline-dark"}
@@ -290,6 +384,27 @@ export default function Home() {
                 ⬅️ W
               </Button>
             </div>
+            {/* Status Legend */}
+            <div
+              className="d-flex justify-content-center flex-wrap mt-3"
+              style={{ gap: "8px", fontSize: "0.75rem" }}
+            >
+              <span className="badge bg-danger">Full Closure</span>
+              <span className="badge bg-warning text-dark">Lane Blocked</span>
+              <span
+                className="badge bg-info text-dark"
+                style={{ backgroundColor: "#ffd34d", color: "#333" }}
+              >
+                Minor Delay
+              </span>
+              <span className="badge bg-secondary">Low Impact</span>
+              <span
+                className="badge bg-primary"
+                style={{ backgroundColor: "#ff8c00" }}
+              >
+                Active
+              </span>
+            </div>
           </Col>
         </Row>
       )}
@@ -325,14 +440,18 @@ export default function Home() {
               dataType === "Events" ? (
                 // Use EventTrafficCard for Events data with direction filter
                 (() => {
-                  const filteredData = filterByDirection(trafficData.data);
+                  // Apply roadway then direction filters
+                  let filteredData = filterByRoadway(trafficData.data);
+                  filteredData = filterByDirection(filteredData);
                   return filteredData.length > 0 ? (
                     <div>
                       <p className="text-muted mb-3">
                         Showing {filteredData.length} of{" "}
                         {trafficData.data.length} events
+                        {roadwayFilter !== "ALL" &&
+                          ` | Road: ${roadwayFilter.replace("_", " ")}`}
                         {directionFilter !== "ALL" &&
-                          ` (${directionFilter}BOUND)`}
+                          ` | Dir: ${directionFilter}`}
                       </p>
                       <Row>
                         {filteredData.slice(0, 50).map((item, index) => (
