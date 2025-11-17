@@ -65,21 +65,72 @@ export default function EventTrafficCard({ event }) {
       "impactedLanes"
     ) || "Unknown";
 
+  // Determine status category & colors
+  const isFullClosure = !!(event.IsFullClosure || event.isFullClosure);
+  const lanesText = (lanesAffected || "").toString().toLowerCase();
+  const descLower = (description || "").toString().toLowerCase();
+
+  let statusCategory = "ACTIVE";
+  let statusColor = "#ff8c00"; // default active orange
+
+  if (isFullClosure) {
+    statusCategory = "FULL CLOSURE";
+    statusColor = "#dc3545"; // red
+  } else if (/lane/.test(lanesText) && /(closed|block)/.test(lanesText)) {
+    statusCategory = "LANE BLOCKED";
+    statusColor = "#ff8c00"; // orange
+  } else if (
+    /minor/.test(descLower) ||
+    /delay/.test(descLower) ||
+    /slow/.test(descLower)
+  ) {
+    statusCategory = "MINOR DELAY";
+    statusColor = "#ffd34d"; // yellow
+  } else if (
+    /planned/.test(descLower) ||
+    /schedule/.test(descLower) ||
+    /mainten/.test(descLower)
+  ) {
+    statusCategory = "LOW IMPACT";
+    statusColor = "#6c757d"; // gray
+  }
+
   return (
     <div
       style={{
         width: "100%",
         height: "100%",
         backgroundColor: "#1a1a1a",
-        border: "3px solid #FFA500",
+        border: `3px solid ${statusColor}`,
         borderRadius: "8px",
         padding: "16px",
         boxShadow: "0 4px 6px rgba(0, 0, 0, 0.4)",
         fontFamily: "Arial, sans-serif",
         display: "flex",
         flexDirection: "column",
+        position: "relative",
       }}
     >
+      {/* Status Badge */}
+      <div
+        style={{
+          position: "absolute",
+          top: "8px",
+          right: "12px",
+          backgroundColor: statusColor,
+          color:
+            statusCategory === "LANE BLOCKED" || statusCategory === "ACTIVE"
+              ? "#fff"
+              : "#fff",
+          padding: "4px 8px",
+          borderRadius: "4px",
+          fontSize: "0.65rem",
+          fontWeight: 700,
+          letterSpacing: "0.5px",
+        }}
+      >
+        {statusCategory}
+      </div>
       {/* Direction of Travel - Highway Sign Style */}
       <div
         style={{

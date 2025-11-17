@@ -13,8 +13,6 @@ import {
   Alert,
   Badge,
   Button,
-  Input,
-  FormGroup,
   Label,
   Progress,
 } from "reactstrap";
@@ -30,6 +28,8 @@ export default function Home() {
   const [directionFilter, setDirectionFilter] = useState("ALL");
   // Roadway filter: focus on Highway 401 frequent usage
   const [roadwayFilter, setRoadwayFilter] = useState("ALL");
+  // Dynamic road picked from backend list (overrides preset roadwayFilter when set)
+  const [selectedRoad, setSelectedRoad] = useState("ALL");
 
   const MAX_CALLS = 10;
   const TIME_WINDOW = 60000; // 60 seconds in milliseconds
@@ -109,6 +109,22 @@ export default function Home() {
   // Filter events by roadway (prior to direction filtering)
   const filterByRoadway = (data) => {
     if (!data || !Array.isArray(data)) return data;
+    // If a specific road is selected from backend list, use it first
+    if (selectedRoad && selectedRoad !== "ALL") {
+      return data.filter((item) => {
+        const roadway = (
+          item.roadway ||
+          item.roadwayName ||
+          item.RoadwayName ||
+          item.roadName ||
+          ""
+        )
+          .toString()
+          .toUpperCase();
+        return roadway.includes(selectedRoad.toString().toUpperCase());
+      });
+    }
+
     if (roadwayFilter === "ALL") return data;
 
     const matches401 = (item) => {
@@ -190,7 +206,7 @@ export default function Home() {
     <Container className="py-5">
       <Row className="mb-4">
         <Col>
-          <h1 className="text-center mb-3">511 Ontario Traffic Information</h1>
+          <h1 className="text-center mb-3">Ontario Traffic Information</h1>
           <p className="text-center text-muted">
             Real-time traffic data from 511 Ontario API
           </p>
@@ -294,50 +310,6 @@ export default function Home() {
       {dataType === "Events" && trafficData && trafficData.success && (
         <Row className="mb-4">
           <Col>
-            {/* Roadway Filters */}
-            <div className="d-flex justify-content-center gap-2 flex-wrap mb-3">
-              <Button
-                color={
-                  roadwayFilter === "ALL" ? "secondary" : "outline-secondary"
-                }
-                size="sm"
-                onClick={() => setRoadwayFilter("ALL")}
-              >
-                All Roads
-              </Button>
-              <Button
-                color={roadwayFilter === "401" ? "primary" : "outline-primary"}
-                size="sm"
-                onClick={() => setRoadwayFilter("401")}
-              >
-                Hwy 401
-              </Button>
-              <Button
-                color={
-                  roadwayFilter === "401_E" ? "primary" : "outline-primary"
-                }
-                size="sm"
-                onClick={() => setRoadwayFilter("401_E")}
-              >
-                401 EB
-              </Button>
-              <Button
-                color={
-                  roadwayFilter === "401_W" ? "primary" : "outline-primary"
-                }
-                size="sm"
-                onClick={() => setRoadwayFilter("401_W")}
-              >
-                401 WB
-              </Button>
-              <Button
-                color={roadwayFilter === "OTHER" ? "dark" : "outline-dark"}
-                size="sm"
-                onClick={() => setRoadwayFilter("OTHER")}
-              >
-                Other Roads
-              </Button>
-            </div>
             {/* Direction Filters */}
             <div className="d-flex justify-content-center gap-2 flex-wrap">
               <Button
@@ -384,27 +356,47 @@ export default function Home() {
                 ⬅️ W
               </Button>
             </div>
-            {/* Status Legend */}
-            <div
-              className="d-flex justify-content-center flex-wrap mt-3"
-              style={{ gap: "8px", fontSize: "0.75rem" }}
-            >
-              <span className="badge bg-danger">Full Closure</span>
-              <span className="badge bg-warning text-dark">Lane Blocked</span>
-              <span
-                className="badge bg-info text-dark"
-                style={{ backgroundColor: "#ffd34d", color: "#333" }}
-              >
-                Minor Delay
-              </span>
-              <span className="badge bg-secondary">Low Impact</span>
-              <span
-                className="badge bg-primary"
-                style={{ backgroundColor: "#ff8c00" }}
-              >
-                Active
-              </span>
-            </div>
+            {/* Backend Roads List Selector */}
+            {trafficData?.roads?.list &&
+              Array.isArray(trafficData.roads.list) && (
+                <div className="d-flex justify-content-center align-items-center gap-2 mt-3 flex-wrap">
+                  <div className="d-flex gap-2 flex-wrap">
+                    <Button
+                      outline
+                      color="secondary"
+                      size="sm"
+                      active={selectedRoad === "ALL"}
+                      onClick={() => setSelectedRoad("ALL")}
+                    >
+                      All Roads
+                    </Button>
+                    {(() => {
+                      const top = Array.isArray(trafficData?.roads?.top)
+                        ? trafficData.roads.top.map((t) => t.road)
+                        : [];
+                      const list = Array.isArray(trafficData?.roads?.list)
+                        ? trafficData.roads.list
+                        : [];
+                      const roads = top.length > 0 ? top : list;
+                      return roads.slice(0, 12).map((road, idx) => (
+                        <Button
+                          key={`${road}-${idx}`}
+                          outline
+                          color="primary"
+                          size="sm"
+                          active={selectedRoad === road}
+                          onClick={() => {
+                            setSelectedRoad(road);
+                            if (road !== "ALL") setRoadwayFilter("ALL");
+                          }}
+                        >
+                          {road}
+                        </Button>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
           </Col>
         </Row>
       )}
@@ -448,6 +440,7 @@ export default function Home() {
                       <p className="text-muted mb-3">
                         Showing {filteredData.length} of{" "}
                         {trafficData.data.length} events
+                        {selectedRoad !== "ALL" && ` | Road: ${selectedRoad}`}
                         {roadwayFilter !== "ALL" &&
                           ` | Road: ${roadwayFilter.replace("_", " ")}`}
                         {directionFilter !== "ALL" &&
