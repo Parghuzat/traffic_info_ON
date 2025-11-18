@@ -14,6 +14,8 @@ import {
   Progress,
 } from "reactstrap";
 import EventTrafficCard from "../components/EventTrafficCard";
+import SimulationControlPanel from "@/app/components/SimulationControlPanel";
+import { dummyRoutes, routeLabels } from "./dummyData";
 
 export default function NearbyTraffic() {
   const [trafficData, setTrafficData] = useState(null);
@@ -23,6 +25,8 @@ export default function NearbyTraffic() {
   const [userLocation, setUserLocation] = useState(null);
   const [userDirection, setUserDirection] = useState(null); // bearing in degrees
   const [nearestRoad, setNearestRoad] = useState(null);
+  const [usingDummy, setUsingDummy] = useState(false);
+  const [selectedDummyRouteKey, setSelectedDummyRouteKey] = useState(null);
   const [travelDirection, setTravelDirection] = useState(null); // N, S, E, W
 
   // API rate limiting
@@ -35,6 +39,7 @@ export default function NearbyTraffic() {
   const locationWatchId = useRef(null);
   const firstPosition = useRef(null);
   const secondPosition = useRef(null);
+  const dummyIndexRef = useRef(0);
 
   // Check if we can make API call
   const canMakeApiCall = () => {
@@ -95,6 +100,45 @@ export default function NearbyTraffic() {
     if (bearing >= 135 && bearing < 225) return "SOUTH";
     if (bearing >= 225 && bearing < 315) return "WEST";
     return "NORTH";
+  };
+
+  // Activate a dummy route: simulate two points to derive direction
+  const activateDummyRoute = (routeKey) => {
+    const route = dummyRoutes[routeKey];
+    if (!route || route.length < 2) return;
+    setUsingDummy(true);
+    setSelectedDummyRouteKey(routeKey);
+    setLocationStatus("tracking");
+    firstPosition.current = {
+      lat: route[0].lat,
+      lon: route[0].lon,
+      timestamp: Date.now(),
+    };
+    const last = route[route.length - 1];
+    secondPosition.current = {
+      lat: last.lat,
+      lon: last.lon,
+      timestamp: Date.now() + 4000,
+    };
+    const bearing = calculateBearing(
+      firstPosition.current.lat,
+      firstPosition.current.lon,
+      secondPosition.current.lat,
+      secondPosition.current.lon
+    );
+    const distance = calculateDistance(
+      firstPosition.current.lat,
+      firstPosition.current.lon,
+      secondPosition.current.lat,
+      secondPosition.current.lon
+    );
+    if (distance > 0.01) {
+      setUserDirection(bearing);
+      setTravelDirection(bearingToDirection(bearing));
+    }
+    setUserLocation(secondPosition.current);
+    setLocationStatus("ready");
+    fetchTrafficData();
   };
 
   // Find nearest road from events data
@@ -338,6 +382,14 @@ export default function NearbyTraffic() {
         </Col>
       </Row>
 
+      {process.env.NODE_ENV !== "production" && (
+        <Row className="mb-3">
+          <Col md={{ size: 10, offset: 1 }}>
+            <SimulationControlPanel />
+          </Col>
+        </Row>
+      )}
+
       {/* API Rate Limiting Info */}
       <Row className="mb-3">
         <Col>
@@ -398,7 +450,7 @@ export default function NearbyTraffic() {
       </Row>
 
       {/* Location Control */}
-      {locationStatus === "idle" && (
+      {locationStatus === "idle" && !usingDummy && (
         <Row className="mb-4">
           <Col md={{ size: 6, offset: 3 }}>
             <Card>
@@ -416,6 +468,23 @@ export default function NearbyTraffic() {
                 >
                   📍 Use My Location
                 </Button>
+                <hr />
+                <p className="text-muted mb-2">
+                  Or use a dummy route for testing:
+                </p>
+                <div className="d-flex flex-wrap justify-content-center gap-2">
+                  {Object.keys(dummyRoutes).map((key) => (
+                    <Button
+                      key={key}
+                      color="secondary"
+                      outline
+                      size="sm"
+                      onClick={() => activateDummyRoute(key)}
+                    >
+                      {routeLabels[key]}
+                    </Button>
+                  ))}
+                </div>
               </CardBody>
             </Card>
           </Col>
@@ -465,6 +534,25 @@ export default function NearbyTraffic() {
                     >
                       {loading ? <Spinner size="sm" /> : "🔄 Refresh"}
                     </Button>
+                    {usingDummy && (
+                      <Button
+                        color="danger"
+                        outline
+                        size="sm"
+                        className="ms-2"
+                        onClick={() => {
+                          setUsingDummy(false);
+                          setSelectedDummyRouteKey(null);
+                          setUserLocation(null);
+                          setTravelDirection(null);
+                          setUserDirection(null);
+                          setNearestRoad(null);
+                          setLocationStatus("idle");
+                        }}
+                      >
+                        ✖ Clear Dummy
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardBody>
@@ -484,8 +572,8 @@ export default function NearbyTraffic() {
         </Row>
       )}
 
-      {/* Loading */}
-      {loading && (
+      {/* Location Info Display */}
+      {userLocation && locationStatus !== "idle" && (
         <Row>
           <Col className="text-center">
             <Spinner
