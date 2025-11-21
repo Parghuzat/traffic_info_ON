@@ -237,26 +237,55 @@ function NearbyTrafficContent() {
 
     const handleError = (err) => {
       console.error("Location error:", err);
-      if (locationStatus === "requesting") {
-        setError(`Location error: ${err.message}`);
+      let msg = err.message;
+
+      // Map error codes to user-friendly messages
+      if (!msg) {
+        switch (err.code) {
+          case 1: // PERMISSION_DENIED
+            msg =
+              "Location permission denied. Please enable location services.";
+            break;
+          case 2: // POSITION_UNAVAILABLE
+            msg =
+              "GPS signal lost or unavailable. Please check your device settings.";
+            break;
+          case 3: // TIMEOUT
+            msg = "Location request timed out.";
+            break;
+          default:
+            msg = "Unknown location error.";
+        }
+      }
+
+      // If we haven't established a position yet, show error in UI
+      if (!lastPositionRef.current) {
+        setError(msg);
         setLocationStatus("error");
+      } else {
+        // If we have a position, just log the error (transient loss of signal)
+        console.warn("Transient location error:", msg);
+      }
+
+      // Retry logic: Schedule next attempt even if this one failed
+      // (unless permission denied, which is usually permanent for the session)
+      if (err.code !== 1) {
+        if (locationIntervalRef.current)
+          clearTimeout(locationIntervalRef.current);
+        locationIntervalRef.current = setTimeout(getPosition, 5000);
       }
     };
 
-    // Immediate first check
-    navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-    });
-
-    // Interval 5s
-    if (locationIntervalRef.current) clearInterval(locationIntervalRef.current);
-    locationIntervalRef.current = setInterval(() => {
+    const getPosition = () => {
       navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
         enableHighAccuracy: true,
         timeout: 10000,
+        maximumAge: 0,
       });
-    }, 5000);
+    };
+
+    // Start the loop
+    getPosition();
   };
 
   // Auto-start tracking if requested via query param
