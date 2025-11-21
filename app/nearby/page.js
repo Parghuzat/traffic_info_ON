@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Container,
@@ -17,7 +17,7 @@ import {
 import EventTrafficCard from "../components/EventTrafficCard";
 import { dummyRoutes, routeLabels } from "./dummyData";
 
-export default function NearbyTraffic() {
+function NearbyTrafficContent() {
   const searchParams = useSearchParams();
   const [trafficData, setTrafficData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -613,5 +613,20 @@ export default function NearbyTraffic() {
         </Row>
       )}
     </Container>
+  );
+}
+
+export default function NearbyTraffic() {
+  return (
+    <Suspense
+      fallback={
+        <Container className="py-4 text-center">
+          <Spinner color="primary" />
+          <p className="mt-3">Loading...</p>
+        </Container>
+      }
+    >
+      <NearbyTrafficContent />
+    </Suspense>
   );
 }
