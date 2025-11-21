@@ -15,7 +15,6 @@ import {
   Progress,
 } from "reactstrap";
 import EventTrafficCard from "../components/EventTrafficCard";
-import SimulationControlPanel from "@/app/components/SimulationControlPanel";
 import { dummyRoutes, routeLabels } from "./dummyData";
 
 export default function NearbyTraffic() {
@@ -379,27 +378,12 @@ export default function NearbyTraffic() {
       <Row className="mb-4">
         <Col>
           <div className="d-flex justify-content-between align-items-center mb-2">
-            <div>
-              <h1 className="mb-2">Nearby Traffic</h1>
-              <p className="text-muted mb-0">
-                Auto-detect your location and direction to show relevant traffic
-                ahead
-              </p>
-            </div>
             <Button color="secondary" outline size="sm" href="/" tag="a">
               ← Back to All Traffic
             </Button>
           </div>
         </Col>
       </Row>
-
-      {process.env.NODE_ENV !== "production" && (
-        <Row className="mb-3">
-          <Col md={{ size: 10, offset: 1 }}>
-            <SimulationControlPanel />
-          </Col>
-        </Row>
-      )}
 
       {/* API Rate Limiting Info */}
       <Row className="mb-3">
@@ -479,23 +463,6 @@ export default function NearbyTraffic() {
                 >
                   📍 Use My Location
                 </Button>
-                <hr />
-                <p className="text-muted mb-2">
-                  Or use a dummy route for testing:
-                </p>
-                <div className="d-flex flex-wrap justify-content-center gap-2">
-                  {Object.keys(dummyRoutes).map((key) => (
-                    <Button
-                      key={key}
-                      color="secondary"
-                      outline
-                      size="sm"
-                      onClick={() => activateDummyRoute(key)}
-                    >
-                      {routeLabels[key]}
-                    </Button>
-                  ))}
-                </div>
               </CardBody>
             </Card>
           </Col>
@@ -510,30 +477,18 @@ export default function NearbyTraffic() {
               <CardBody>
                 <div className="d-flex justify-content-between align-items-center flex-wrap gap-3">
                   <div>
-                    <strong>Your Location:</strong>{" "}
+                    <strong>GPS:</strong>{" "}
                     <small className="text-muted">
-                      {userLocation.lat.toFixed(6)},{" "}
-                      {userLocation.lon.toFixed(6)}
+                      {userLocation.lat.toFixed(4)},{" "}
+                      {userLocation.lon.toFixed(4)}
                     </small>
                   </div>
-                  {nearestRoad && (
-                    <div>
-                      <strong>Nearest Road:</strong>{" "}
-                      <Badge color="info">{nearestRoad.road}</Badge>{" "}
-                      <small className="text-muted">
-                        ({nearestRoad.distance.toFixed(1)} km away)
-                      </small>
-                    </div>
-                  )}
                   {travelDirection && (
                     <div>
                       <strong>Direction:</strong>{" "}
-                      <Badge color="success">{travelDirection}BOUND</Badge>
-                      {userDirection !== null && (
-                        <small className="text-muted ms-2">
-                          ({userDirection.toFixed(0)}°)
-                        </small>
-                      )}
+                      <Badge color="success" style={{ fontSize: "1.2em" }}>
+                        {travelDirection}
+                      </Badge>
                     </div>
                   )}
                   <div>
