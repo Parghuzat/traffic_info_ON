@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   Container,
   Row,
@@ -13,7 +13,6 @@ import {
   Alert,
   Badge,
   Button,
-  Label,
   Progress,
 } from "reactstrap";
 import EventTrafficCard from "./components/EventTrafficCard";
