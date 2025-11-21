@@ -23,6 +23,7 @@ function NearbyTrafficContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [locationStatus, setLocationStatus] = useState("idle"); // idle, requesting, tracking, ready, error
+  const [gpsQuality, setGpsQuality] = useState("none"); // none, high, low, lastKnown
   const [userLocation, setUserLocation] = useState(null);
   const [userDirection, setUserDirection] = useState(null); // bearing in degrees
   const [nearestRoad, setNearestRoad] = useState(null);
@@ -41,6 +42,8 @@ function NearbyTrafficContent() {
   const dataFetchIntervalRef = useRef(null);
   const lastPositionRef = useRef(null);
   const dummyIndexRef = useRef(0);
+  const useHighAccuracyRef = useRef(true);
+  const retryDelayRef = useRef(5000);
 
   // Cleanup intervals on unmount
   useEffect(() => {
@@ -201,6 +204,12 @@ function NearbyTrafficContent() {
         timestamp: position.timestamp,
       };
 
+      // Reset retry delay on success
+      retryDelayRef.current = 5000;
+
+      // Update GPS quality status
+      setGpsQuality(useHighAccuracyRef.current ? "high" : "low");
+
       if (lastPositionRef.current) {
         const distance = calculateDistance(
           lastPositionRef.current.lat,
@@ -225,19 +234,17 @@ function NearbyTrafficContent() {
       setUserLocation(newPos);
       if (locationStatus !== "ready") setLocationStatus("ready");
 
-      // If this is the first fix, fetch data immediately
-      if (!trafficData) {
-        // We can't call fetchTrafficData directly here easily if it depends on state that isn't updated yet
-        // But we can rely on the interval or a separate effect.
-        // Let's just let the interval handle it or the user click.
-        // Actually, better to trigger one fetch.
-        // We'll use a separate effect for "initial fetch on ready".
-      }
+      // Schedule next update
+      if (locationIntervalRef.current)
+        clearTimeout(locationIntervalRef.current);
+      locationIntervalRef.current = setTimeout(getPosition, 5000);
     };
 
     const handleError = (err) => {
       console.error("Location error:", err);
       let msg = err.message;
+      let shouldRetry = true;
+      let isFatal = false;
 
       // Map error codes to user-friendly messages
       if (!msg) {
@@ -245,6 +252,8 @@ function NearbyTrafficContent() {
           case 1: // PERMISSION_DENIED
             msg =
               "Location permission denied. Please enable location services.";
+            shouldRetry = false;
+            isFatal = true;
             break;
           case 2: // POSITION_UNAVAILABLE
             msg =
@@ -258,30 +267,58 @@ function NearbyTrafficContent() {
         }
       }
 
-      // If we haven't established a position yet, show error in UI
-      if (!lastPositionRef.current) {
-        setError(msg);
-        setLocationStatus("error");
-      } else {
-        // If we have a position, just log the error (transient loss of signal)
-        console.warn("Transient location error:", msg);
+      // Handle fallback logic for timeout/unavailable
+      if (shouldRetry && (err.code === 2 || err.code === 3)) {
+        if (useHighAccuracyRef.current) {
+          // If high accuracy failed, switch to low accuracy immediately
+          console.warn("High accuracy GPS failed, switching to fallback mode.");
+          useHighAccuracyRef.current = false;
+          // Retry immediately with new settings
+          getPosition();
+          return;
+        } else {
+          // If already in fallback mode and failing, back off
+          retryDelayRef.current = Math.min(retryDelayRef.current * 1.5, 30000); // Cap at 30s
+        }
       }
 
-      // Retry logic: Schedule next attempt even if this one failed
-      // (unless permission denied, which is usually permanent for the session)
-      if (err.code !== 1) {
+      // If we have a last known position, don't show error, just warn
+      if (lastPositionRef.current && !isFatal) {
+        console.warn(
+          "Transient location error, using last known position:",
+          msg
+        );
+        setGpsQuality("lastKnown");
+        // Keep status as ready so UI doesn't break
+        setLocationStatus("ready");
+      } else {
+        // No previous position or fatal error
+        setError(msg);
+        setLocationStatus("error");
+        setGpsQuality("none");
+      }
+
+      // Schedule retry if applicable
+      if (shouldRetry) {
         if (locationIntervalRef.current)
           clearTimeout(locationIntervalRef.current);
-        locationIntervalRef.current = setTimeout(getPosition, 5000);
+        locationIntervalRef.current = setTimeout(
+          getPosition,
+          retryDelayRef.current
+        );
       }
     };
 
     const getPosition = () => {
-      navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      });
+      const options = useHighAccuracyRef.current
+        ? { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+        : { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 };
+
+      navigator.geolocation.getCurrentPosition(
+        handlePosition,
+        handleError,
+        options
+      );
     };
 
     // Start the loop
@@ -462,7 +499,9 @@ function NearbyTrafficContent() {
                     <Badge
                       color={
                         locationStatus === "ready"
-                          ? "success"
+                          ? gpsQuality === "lastKnown"
+                            ? "warning"
+                            : "success"
                           : locationStatus === "error"
                           ? "danger"
                           : "info"
@@ -471,7 +510,10 @@ function NearbyTrafficContent() {
                       {locationStatus === "requesting" &&
                         "Requesting location..."}
                       {locationStatus === "tracking" && "Tracking movement..."}
-                      {locationStatus === "ready" && "Location ready"}
+                      {locationStatus === "ready" &&
+                        (gpsQuality === "lastKnown"
+                          ? "Using last known location"
+                          : "Location ready")}
                       {locationStatus === "error" && "Location error"}
                     </Badge>
                   )}
