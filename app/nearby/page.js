@@ -379,7 +379,7 @@ function NearbyTrafficContent() {
         <Col>
           <div className="d-flex justify-content-between align-items-center mb-2">
             <Button color="secondary" outline size="sm" href="/" tag="a">
-              ← Back to All Traffic
+              ← Back to Main Menu
             </Button>
           </div>
         </Col>
