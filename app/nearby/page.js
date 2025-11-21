@@ -197,6 +197,9 @@ function NearbyTrafficContent() {
     setLocationStatus("requesting");
     setError(null);
 
+    // Clear any existing timers
+    if (locationIntervalRef.current) clearTimeout(locationIntervalRef.current);
+
     const handlePosition = (position) => {
       const newPos = {
         lat: position.coords.latitude,
@@ -204,11 +207,12 @@ function NearbyTrafficContent() {
         timestamp: position.timestamp,
       };
 
-      // Reset retry delay on success
+      // Success! Reset backoff and quality
       retryDelayRef.current = 5000;
-
-      // Update GPS quality status
       setGpsQuality(useHighAccuracyRef.current ? "high" : "low");
+
+      // If we were in error state but now have a fix, clear error
+      if (error) setError(null);
 
       if (lastPositionRef.current) {
         const distance = calculateDistance(
@@ -234,78 +238,71 @@ function NearbyTrafficContent() {
       setUserLocation(newPos);
       if (locationStatus !== "ready") setLocationStatus("ready");
 
-      // Schedule next update
+      // Schedule next update (standard 5s interval)
       if (locationIntervalRef.current)
         clearTimeout(locationIntervalRef.current);
       locationIntervalRef.current = setTimeout(getPosition, 5000);
     };
 
     const handleError = (err) => {
-      console.error("Location error:", err);
-      let msg = err.message;
-      let shouldRetry = true;
-      let isFatal = false;
-
-      // Map error codes to user-friendly messages
-      if (!msg) {
-        switch (err.code) {
-          case 1: // PERMISSION_DENIED
-            msg =
-              "Location permission denied. Please enable location services.";
-            shouldRetry = false;
-            isFatal = true;
-            break;
-          case 2: // POSITION_UNAVAILABLE
-            msg =
-              "GPS signal lost or unavailable. Please check your device settings.";
-            break;
-          case 3: // TIMEOUT
-            msg = "Location request timed out.";
-            break;
-          default:
-            msg = "Unknown location error.";
-        }
+      // 1. Handle PERMISSION_DENIED (Fatal)
+      if (err.code === 1) {
+        console.error("Location permission denied.");
+        setError(
+          "Location permission denied. Please enable location services."
+        );
+        setLocationStatus("error");
+        setGpsQuality("none");
+        return; // Stop retrying
       }
 
-      // Handle fallback logic for timeout/unavailable
-      if (shouldRetry && (err.code === 2 || err.code === 3)) {
+      // 2. Handle Temporary Errors (Unavailable / Timeout)
+      const isTemporary = err.code === 2 || err.code === 3;
+
+      if (isTemporary) {
+        // Fallback logic: High -> Low accuracy
         if (useHighAccuracyRef.current) {
-          // If high accuracy failed, switch to low accuracy immediately
           console.warn("High accuracy GPS failed, switching to fallback mode.");
           useHighAccuracyRef.current = false;
           // Retry immediately with new settings
+          if (locationIntervalRef.current)
+            clearTimeout(locationIntervalRef.current);
           getPosition();
           return;
-        } else {
-          // If already in fallback mode and failing, back off
-          retryDelayRef.current = Math.min(retryDelayRef.current * 1.5, 30000); // Cap at 30s
         }
-      }
 
-      // If we have a last known position, don't show error, just warn
-      if (lastPositionRef.current && !isFatal) {
-        console.warn(
-          "Transient location error, using last known position:",
-          msg
-        );
-        setGpsQuality("lastKnown");
-        // Keep status as ready so UI doesn't break
-        setLocationStatus("ready");
-      } else {
-        // No previous position or fatal error
-        setError(msg);
-        setLocationStatus("error");
-        setGpsQuality("none");
-      }
+        // If we have a last known position, use it
+        if (lastPositionRef.current) {
+          // Only log occasionally or if status changes
+          if (gpsQuality !== "lastKnown") {
+            console.warn("GPS signal weak. Using last known location.");
+          }
+          setGpsQuality("lastKnown");
+          // Ensure UI stays ready
+          if (locationStatus !== "ready") setLocationStatus("ready");
+        } else {
+          // No fix yet, show error
+          console.warn("GPS signal unavailable and no previous fix.");
+          setError("GPS signal lost or unavailable. Searching...");
+          setLocationStatus("error");
+          setGpsQuality("none");
+        }
 
-      // Schedule retry if applicable
-      if (shouldRetry) {
+        // Backoff logic
+        retryDelayRef.current = Math.min(retryDelayRef.current * 1.5, 30000); // Cap at 30s
+
+        // Schedule retry
         if (locationIntervalRef.current)
           clearTimeout(locationIntervalRef.current);
         locationIntervalRef.current = setTimeout(
           getPosition,
           retryDelayRef.current
         );
+      } else {
+        // Unknown error
+        console.error("Unknown location error:", err);
+        setError(err.message || "Unknown location error");
+        setLocationStatus("error");
       }
     };
 
