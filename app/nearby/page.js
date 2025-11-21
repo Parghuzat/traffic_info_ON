@@ -538,8 +538,8 @@ function NearbyTrafficContent() {
         </Row>
       )}
 
-      {/* Location Info Display */}
-      {userLocation && locationStatus !== "idle" && (
+      {/* Loading Spinner */}
+      {loading && (
         <Row>
           <Col className="text-center">
             <Spinner
