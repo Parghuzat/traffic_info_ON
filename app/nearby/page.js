@@ -238,10 +238,9 @@ function NearbyTrafficContent() {
       setUserLocation(newPos);
       if (locationStatus !== "ready") setLocationStatus("ready");
 
-      // Schedule next update (standard 5s interval)
+      // Stop updating location after first fix
       if (locationIntervalRef.current)
         clearTimeout(locationIntervalRef.current);
-      locationIntervalRef.current = setTimeout(getPosition, 5000);
     };
 
     const handleError = (err) => {
