@@ -37,10 +37,20 @@ function NearbyTrafficContent() {
   const TIME_WINDOW = 60000;
   const COOLDOWN_AFTER_LIMIT = 30000;
 
-  const locationWatchId = useRef(null);
-  const firstPosition = useRef(null);
-  const secondPosition = useRef(null);
+  const locationIntervalRef = useRef(null);
+  const dataFetchIntervalRef = useRef(null);
+  const lastPositionRef = useRef(null);
   const dummyIndexRef = useRef(0);
+
+  // Cleanup intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (locationIntervalRef.current)
+        clearInterval(locationIntervalRef.current);
+      if (dataFetchIntervalRef.current)
+        clearInterval(dataFetchIntervalRef.current);
+    };
+  }, []);
 
   // Check if we can make API call
   const canMakeApiCall = () => {
@@ -70,7 +80,6 @@ function NearbyTrafficContent() {
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371; // Earth's radius in km
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos((lat1 * Math.PI) / 180) *
@@ -185,74 +194,69 @@ function NearbyTrafficContent() {
     setLocationStatus("requesting");
     setError(null);
 
-    try {
-      // Get first position
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          firstPosition.current = {
-            lat: position.coords.latitude,
-            lon: position.coords.longitude,
-            timestamp: position.timestamp,
-          };
-          setUserLocation(firstPosition.current);
-          setLocationStatus("tracking");
+    const handlePosition = (position) => {
+      const newPos = {
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+        timestamp: position.timestamp,
+      };
 
-          // Wait 4 seconds and get second position
-          setTimeout(() => {
-            navigator.geolocation.getCurrentPosition(
-              (position2) => {
-                secondPosition.current = {
-                  lat: position2.coords.latitude,
-                  lon: position2.coords.longitude,
-                  timestamp: position2.timestamp,
-                };
+      if (lastPositionRef.current) {
+        const distance = calculateDistance(
+          lastPositionRef.current.lat,
+          lastPositionRef.current.lon,
+          newPos.lat,
+          newPos.lon
+        );
+        // Threshold 10 meters (0.01 km)
+        if (distance > 0.01) {
+          const bearing = calculateBearing(
+            lastPositionRef.current.lat,
+            lastPositionRef.current.lon,
+            newPos.lat,
+            newPos.lon
+          );
+          setUserDirection(bearing);
+          setTravelDirection(bearingToDirection(bearing));
+        }
+      }
 
-                // Calculate bearing and direction
-                const bearing = calculateBearing(
-                  firstPosition.current.lat,
-                  firstPosition.current.lon,
-                  secondPosition.current.lat,
-                  secondPosition.current.lon
-                );
+      lastPositionRef.current = newPos;
+      setUserLocation(newPos);
+      if (locationStatus !== "ready") setLocationStatus("ready");
 
-                const distance = calculateDistance(
-                  firstPosition.current.lat,
-                  firstPosition.current.lon,
-                  secondPosition.current.lat,
-                  secondPosition.current.lon
-                );
+      // If this is the first fix, fetch data immediately
+      if (!trafficData) {
+        // We can't call fetchTrafficData directly here easily if it depends on state that isn't updated yet
+        // But we can rely on the interval or a separate effect.
+        // Let's just let the interval handle it or the user click.
+        // Actually, better to trigger one fetch.
+        // We'll use a separate effect for "initial fetch on ready".
+      }
+    };
 
-                // Only set direction if moved significantly (> 10 meters)
-                if (distance > 0.01) {
-                  setUserDirection(bearing);
-                  setTravelDirection(bearingToDirection(bearing));
-                }
+    const handleError = (err) => {
+      console.error("Location error:", err);
+      if (locationStatus === "requesting") {
+        setError(`Location error: ${err.message}`);
+        setLocationStatus("error");
+      }
+    };
 
-                setUserLocation(secondPosition.current);
-                setLocationStatus("ready");
+    // Immediate first check
+    navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+    });
 
-                // Auto-fetch traffic data
-                fetchTrafficData();
-              },
-              (err) => {
-                console.error("Error getting second position:", err);
-                setLocationStatus("ready"); // Still use first position
-                fetchTrafficData();
-              },
-              { enableHighAccuracy: true, timeout: 10000 }
-            );
-          }, 4000);
-        },
-        (err) => {
-          setError(`Location error: ${err.message}`);
-          setLocationStatus("error");
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    } catch (err) {
-      setError(`Failed to get location: ${err.message}`);
-      setLocationStatus("error");
-    }
+    // Interval 5s
+    if (locationIntervalRef.current) clearInterval(locationIntervalRef.current);
+    locationIntervalRef.current = setInterval(() => {
+      navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+      });
+    }, 5000);
   };
 
   // Auto-start tracking if requested via query param
@@ -313,6 +317,31 @@ function NearbyTrafficContent() {
       setLoading(false);
     }
   };
+
+  // Ref for fetchTrafficData to use in interval
+  const fetchTrafficDataRef = useRef(fetchTrafficData);
+  useEffect(() => {
+    fetchTrafficDataRef.current = fetchTrafficData;
+  }, [fetchTrafficData]);
+
+  // Auto-fetch traffic data when location is ready and every 15s
+  useEffect(() => {
+    if (locationStatus === "ready" && !usingDummy) {
+      // Initial fetch
+      fetchTrafficDataRef.current();
+
+      // Start interval
+      if (dataFetchIntervalRef.current)
+        clearInterval(dataFetchIntervalRef.current);
+      dataFetchIntervalRef.current = setInterval(() => {
+        fetchTrafficDataRef.current();
+      }, 15000);
+    }
+    return () => {
+      if (dataFetchIntervalRef.current)
+        clearInterval(dataFetchIntervalRef.current);
+    };
+  }, [locationStatus, usingDummy]);
 
   // Filter and sort events by proximity and direction
   const getFilteredEvents = () => {
@@ -557,20 +586,26 @@ function NearbyTrafficContent() {
           <Col>
             <div className="mb-3">
               <p className="text-muted">
-                Showing {filteredEvents.slice(0, 50).length} events
+                Showing{" "}
+                {travelDirection ? 1 : filteredEvents.slice(0, 50).length} event
+                {!travelDirection && filteredEvents.length > 1 ? "s" : ""}
                 {nearestRoad && ` on ${nearestRoad.road}`}
                 {travelDirection && ` (${travelDirection}BOUND)`}
+                {travelDirection && " - Closest Event"}
               </p>
             </div>
             <Row>
-              {filteredEvents.slice(0, 50).map((item, index) => (
+              {(travelDirection
+                ? filteredEvents.slice(0, 1)
+                : filteredEvents.slice(0, 50)
+              ).map((item, index) => (
                 <Col
                   key={index}
                   xs={12}
-                  sm={6}
-                  md={6}
-                  lg={4}
-                  xl={3}
+                  sm={travelDirection ? 12 : 6}
+                  md={travelDirection ? 12 : 6}
+                  lg={travelDirection ? 12 : 4}
+                  xl={travelDirection ? 12 : 3}
                   className="mb-3"
                 >
                   <div className="position-relative">
