@@ -23,7 +23,6 @@ function NearbyTrafficContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [locationStatus, setLocationStatus] = useState("idle"); // idle, requesting, tracking, ready, error
-  const [gpsQuality, setGpsQuality] = useState("none"); // none, high, low, lastKnown
   const [userLocation, setUserLocation] = useState(null);
   const [userDirection, setUserDirection] = useState(null); // bearing in degrees
   const [nearestRoad, setNearestRoad] = useState(null);
@@ -38,22 +37,10 @@ function NearbyTrafficContent() {
   const TIME_WINDOW = 60000;
   const COOLDOWN_AFTER_LIMIT = 30000;
 
-  const locationIntervalRef = useRef(null);
-  const dataFetchIntervalRef = useRef(null);
-  const lastPositionRef = useRef(null);
+  const locationWatchId = useRef(null);
+  const firstPosition = useRef(null);
+  const secondPosition = useRef(null);
   const dummyIndexRef = useRef(0);
-  const useHighAccuracyRef = useRef(true);
-  const retryDelayRef = useRef(5000);
-
-  // Cleanup intervals on unmount
-  useEffect(() => {
-    return () => {
-      if (locationIntervalRef.current)
-        clearInterval(locationIntervalRef.current);
-      if (dataFetchIntervalRef.current)
-        clearInterval(dataFetchIntervalRef.current);
-    };
-  }, []);
 
   // Check if we can make API call
   const canMakeApiCall = () => {
@@ -83,6 +70,7 @@ function NearbyTrafficContent() {
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371; // Earth's radius in km
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos((lat1 * Math.PI) / 180) *
@@ -197,128 +185,74 @@ function NearbyTrafficContent() {
     setLocationStatus("requesting");
     setError(null);
 
-    // Clear any existing timers
-    if (locationIntervalRef.current) clearTimeout(locationIntervalRef.current);
-
-    const handlePosition = (position) => {
-      const newPos = {
-        lat: position.coords.latitude,
-        lon: position.coords.longitude,
-        timestamp: position.timestamp,
-      };
-
-      // Success! Reset backoff and quality
-      retryDelayRef.current = 5000;
-      setGpsQuality(useHighAccuracyRef.current ? "high" : "low");
-
-      // If we were in error state but now have a fix, clear error
-      if (error) setError(null);
-
-      if (lastPositionRef.current) {
-        const distance = calculateDistance(
-          lastPositionRef.current.lat,
-          lastPositionRef.current.lon,
-          newPos.lat,
-          newPos.lon
-        );
-        // Threshold 10 meters (0.01 km)
-        if (distance > 0.01) {
-          const bearing = calculateBearing(
-            lastPositionRef.current.lat,
-            lastPositionRef.current.lon,
-            newPos.lat,
-            newPos.lon
-          );
-          setUserDirection(bearing);
-          setTravelDirection(bearingToDirection(bearing));
-        }
-      }
-
-      lastPositionRef.current = newPos;
-      setUserLocation(newPos);
-      if (locationStatus !== "ready") setLocationStatus("ready");
-
-      // Stop updating location after first fix
-      if (locationIntervalRef.current)
-        clearTimeout(locationIntervalRef.current);
-    };
-
-    const handleError = (err) => {
-      // 1. Handle PERMISSION_DENIED (Fatal)
-      if (err.code === 1) {
-        console.error("Location permission denied.");
-        setError(
-          "Location permission denied. Please enable location services."
-        );
-        setLocationStatus("error");
-        setGpsQuality("none");
-        return; // Stop retrying
-      }
-
-      // 2. Handle Temporary Errors (Unavailable / Timeout)
-      const isTemporary = err.code === 2 || err.code === 3;
-
-      if (isTemporary) {
-        // Fallback logic: High -> Low accuracy
-        if (useHighAccuracyRef.current) {
-          console.warn("High accuracy GPS failed, switching to fallback mode.");
-          useHighAccuracyRef.current = false;
-          // Retry immediately with new settings
-          if (locationIntervalRef.current)
-            clearTimeout(locationIntervalRef.current);
-          getPosition();
-          return;
-        }
-
-        // If we have a last known position, use it
-        if (lastPositionRef.current) {
-          // Only log occasionally or if status changes
-          if (gpsQuality !== "lastKnown") {
-            console.warn("GPS signal weak. Using last known location.");
-          }
-          setGpsQuality("lastKnown");
-          // Ensure UI stays ready
-          if (locationStatus !== "ready") setLocationStatus("ready");
-        } else {
-          // No fix yet, show error
-          console.warn("GPS signal unavailable and no previous fix.");
-          setError("GPS signal lost or unavailable. Searching...");
-          setLocationStatus("error");
-          setGpsQuality("none");
-        }
-
-        // Backoff logic
-        retryDelayRef.current = Math.min(retryDelayRef.current * 1.5, 30000); // Cap at 30s
-
-        // Schedule retry
-        if (locationIntervalRef.current)
-          clearTimeout(locationIntervalRef.current);
-        locationIntervalRef.current = setTimeout(
-          getPosition,
-          retryDelayRef.current
-        );
-      } else {
-        // Unknown error
-        console.error("Unknown location error:", err);
-        setError(err.message || "Unknown location error");
-        setLocationStatus("error");
-      }
-    };
-
-    const getPosition = () => {
-      const options = useHighAccuracyRef.current
-        ? { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
-        : { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 };
-
+    try {
+      // Get first position
       navigator.geolocation.getCurrentPosition(
-        handlePosition,
-        handleError,
-        options
-      );
-    };
+        (position) => {
+          firstPosition.current = {
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+            timestamp: position.timestamp,
+          };
+          setUserLocation(firstPosition.current);
+          setLocationStatus("tracking");
 
-    // Start the loop
-    getPosition();
+          // Wait 4 seconds and get second position
+          setTimeout(() => {
+            navigator.geolocation.getCurrentPosition(
+              (position2) => {
+                secondPosition.current = {
+                  lat: position2.coords.latitude,
+                  lon: position2.coords.longitude,
+                  timestamp: position2.timestamp,
+                };
+
+                // Calculate bearing and direction
+                const bearing = calculateBearing(
+                  firstPosition.current.lat,
+                  firstPosition.current.lon,
+                  secondPosition.current.lat,
+                  secondPosition.current.lon
+                );
+
+                const distance = calculateDistance(
+                  firstPosition.current.lat,
+                  firstPosition.current.lon,
+                  secondPosition.current.lat,
+                  secondPosition.current.lon
+                );
+
+                // Only set direction if moved significantly (> 10 meters)
+                if (distance > 0.01) {
+                  setUserDirection(bearing);
+                  setTravelDirection(bearingToDirection(bearing));
+                }
+
+                setUserLocation(secondPosition.current);
+                setLocationStatus("ready");
+
+                // Auto-fetch traffic data
+                fetchTrafficData();
+              },
+              (err) => {
+                console.error("Error getting second position:", err);
+                setLocationStatus("ready"); // Still use first position
+                fetchTrafficData();
+              },
+              { enableHighAccuracy: true, timeout: 10000 }
+            );
+          }, 4000);
+        },
+        (err) => {
+          setError(`Location error: ${err.message}`);
+          setLocationStatus("error");
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } catch (err) {
+      setError(`Failed to get location: ${err.message}`);
+      setLocationStatus("error");
+    }
   };
 
   // Auto-start tracking if requested via query param
@@ -379,31 +313,6 @@ function NearbyTrafficContent() {
       setLoading(false);
     }
   };
-
-  // Ref for fetchTrafficData to use in interval
-  const fetchTrafficDataRef = useRef(fetchTrafficData);
-  useEffect(() => {
-    fetchTrafficDataRef.current = fetchTrafficData;
-  }, [fetchTrafficData]);
-
-  // Auto-fetch traffic data when location is ready and every 15s
-  useEffect(() => {
-    if (locationStatus === "ready" && !usingDummy) {
-      // Initial fetch
-      fetchTrafficDataRef.current();
-
-      // Start interval
-      if (dataFetchIntervalRef.current)
-        clearInterval(dataFetchIntervalRef.current);
-      dataFetchIntervalRef.current = setInterval(() => {
-        fetchTrafficDataRef.current();
-      }, 15000);
-    }
-    return () => {
-      if (dataFetchIntervalRef.current)
-        clearInterval(dataFetchIntervalRef.current);
-    };
-  }, [locationStatus, usingDummy]);
 
   // Filter and sort events by proximity and direction
   const getFilteredEvents = () => {
@@ -495,9 +404,7 @@ function NearbyTrafficContent() {
                     <Badge
                       color={
                         locationStatus === "ready"
-                          ? gpsQuality === "lastKnown"
-                            ? "warning"
-                            : "success"
+                          ? "success"
                           : locationStatus === "error"
                           ? "danger"
                           : "info"
@@ -506,10 +413,7 @@ function NearbyTrafficContent() {
                       {locationStatus === "requesting" &&
                         "Requesting location..."}
                       {locationStatus === "tracking" && "Tracking movement..."}
-                      {locationStatus === "ready" &&
-                        (gpsQuality === "lastKnown"
-                          ? "Using last known location"
-                          : "Location ready")}
+                      {locationStatus === "ready" && "Location ready"}
                       {locationStatus === "error" && "Location error"}
                     </Badge>
                   )}
@@ -653,26 +557,20 @@ function NearbyTrafficContent() {
           <Col>
             <div className="mb-3">
               <p className="text-muted">
-                Showing{" "}
-                {travelDirection ? 1 : filteredEvents.slice(0, 50).length} event
-                {!travelDirection && filteredEvents.length > 1 ? "s" : ""}
+                Showing {filteredEvents.slice(0, 50).length} events
                 {nearestRoad && ` on ${nearestRoad.road}`}
                 {travelDirection && ` (${travelDirection}BOUND)`}
-                {travelDirection && " - Closest Event"}
               </p>
             </div>
             <Row>
-              {(travelDirection
-                ? filteredEvents.slice(0, 1)
-                : filteredEvents.slice(0, 50)
-              ).map((item, index) => (
+              {filteredEvents.slice(0, 50).map((item, index) => (
                 <Col
                   key={index}
                   xs={12}
-                  sm={travelDirection ? 12 : 6}
-                  md={travelDirection ? 12 : 6}
-                  lg={travelDirection ? 12 : 4}
-                  xl={travelDirection ? 12 : 3}
+                  sm={6}
+                  md={6}
+                  lg={4}
+                  xl={3}
                   className="mb-3"
                 >
                   <div className="position-relative">
