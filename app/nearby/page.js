@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Container,
   Row,
@@ -18,6 +19,7 @@ import SimulationControlPanel from "@/app/components/SimulationControlPanel";
 import { dummyRoutes, routeLabels } from "./dummyData";
 
 export default function NearbyTraffic() {
+  const searchParams = useSearchParams();
   const [trafficData, setTrafficData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -253,6 +255,15 @@ export default function NearbyTraffic() {
       setLocationStatus("error");
     }
   };
+
+  // Auto-start tracking if requested via query param
+  useEffect(() => {
+    const autoStart = searchParams.get("autoStart");
+    if (autoStart === "true" && locationStatus === "idle") {
+      startLocationTracking();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // Fetch traffic data
   const fetchTrafficData = async () => {

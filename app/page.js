@@ -26,7 +26,7 @@ export default function Home() {
     <Container className="vh-100 d-flex flex-column justify-content-center align-items-center">
       <Row className="w-100">
         <Col md={{ size: 8, offset: 2 }} lg={{ size: 6, offset: 3 }}>
-          <Link href="/nearby" passHref legacyBehavior>
+          <Link href="/nearby?autoStart=true" passHref legacyBehavior>
             <Button style={buttonStyle} className="mb-4">
               Start Driving
             </Button>
