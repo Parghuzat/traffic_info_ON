@@ -15,7 +15,6 @@ import {
   Progress,
 } from "reactstrap";
 import EventTrafficCard from "../components/EventTrafficCard";
-import { dummyRoutes, routeLabels } from "./dummyData";
 
 function NearbyTrafficContent() {
   const searchParams = useSearchParams();
@@ -40,7 +39,6 @@ function NearbyTrafficContent() {
   const locationWatchId = useRef(null);
   const firstPosition = useRef(null);
   const secondPosition = useRef(null);
-  const dummyIndexRef = useRef(0);
 
   // Check if we can make API call
   const canMakeApiCall = () => {
@@ -101,45 +99,6 @@ function NearbyTrafficContent() {
     if (bearing >= 135 && bearing < 225) return "SOUTH";
     if (bearing >= 225 && bearing < 315) return "WEST";
     return "NORTH";
-  };
-
-  // Activate a dummy route: simulate two points to derive direction
-  const activateDummyRoute = (routeKey) => {
-    const route = dummyRoutes[routeKey];
-    if (!route || route.length < 2) return;
-    setUsingDummy(true);
-    setSelectedDummyRouteKey(routeKey);
-    setLocationStatus("tracking");
-    firstPosition.current = {
-      lat: route[0].lat,
-      lon: route[0].lon,
-      timestamp: Date.now(),
-    };
-    const last = route[route.length - 1];
-    secondPosition.current = {
-      lat: last.lat,
-      lon: last.lon,
-      timestamp: Date.now() + 4000,
-    };
-    const bearing = calculateBearing(
-      firstPosition.current.lat,
-      firstPosition.current.lon,
-      secondPosition.current.lat,
-      secondPosition.current.lon
-    );
-    const distance = calculateDistance(
-      firstPosition.current.lat,
-      firstPosition.current.lon,
-      secondPosition.current.lat,
-      secondPosition.current.lon
-    );
-    if (distance > 0.01) {
-      setUserDirection(bearing);
-      setTravelDirection(bearingToDirection(bearing));
-    }
-    setUserLocation(secondPosition.current);
-    setLocationStatus("ready");
-    fetchTrafficData();
   };
 
   // Find nearest road from events data
