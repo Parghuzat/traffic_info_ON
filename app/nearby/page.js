@@ -327,6 +327,11 @@ function NearbyTrafficContent() {
         .sort((a, b) => a.distance - b.distance);
     }
 
+    // If direction of travel is determined, return only the closest event
+    if (travelDirection && filtered.length > 0) {
+      return [filtered[0]];
+    }
+
     return filtered;
   };
 
@@ -516,7 +521,9 @@ function NearbyTrafficContent() {
           <Col>
             <div className="mb-3">
               <p className="text-muted">
-                Showing {filteredEvents.slice(0, 50).length} events
+                {travelDirection
+                  ? `Showing next upcoming event`
+                  : `Showing ${filteredEvents.slice(0, 50).length} events`}
                 {nearestRoad && ` on ${nearestRoad.road}`}
                 {travelDirection && ` (${travelDirection}BOUND)`}
               </p>
